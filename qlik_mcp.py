@@ -320,7 +320,7 @@ class GetAppNameInput(BaseModel):
 @mcp.tool(
     name="qlik_get_app_name",
     annotations={
-        "title": "Resolver Nome de App Qlik pelo ID",
+        "title": "Resolve Qlik App Name by ID or QRI",
         "readOnlyHint": True,
         "destructiveHint": False,
         "idempotentHint": True,
@@ -328,14 +328,14 @@ class GetAppNameInput(BaseModel):
     },
 )
 async def qlik_get_app_name(params: GetAppNameInput) -> str:
-    """Retorna nome, space e metadados de uma app Qlik a partir do seu ID ou QRI.
+    """Return the name, space, and metadata of a Qlik app by its ID or full QRI.
 
     Args:
         params (GetAppNameInput):
-            - app_id (str): GUID da app ou QRI completo (qri:app:sense://GUID).
+            - app_id (str): App GUID or full QRI (qri:app:sense://GUID).
 
     Returns:
-        str: JSON com metadados da app:
+        str: JSON-formatted string:
             {
                 "id": str,
                 "name": str,
@@ -345,9 +345,10 @@ async def qlik_get_app_name(params: GetAppNameInput) -> str:
                 "updatedAt": str,
                 "publishedAt": str | null
             }
+        Or "Error: <message>" on failure.
     """
     try:
-        # Extrai o GUID se vier no formato QRI
+        # Extract GUID if provided as a full QRI
         app_id = params.app_id
         if app_id.startswith("qri:app:sense://"):
             app_id = app_id.replace("qri:app:sense://", "")
