@@ -380,22 +380,22 @@ class GetQvdFieldUsageInput(BaseModel):
 
     qvd_qri: str = Field(
         ...,
-        description="QRI do QVD base (campo 'secureQri' retornado por qlik_search_qvd)",
+        description="QRI of the base QVD (the secureQri field returned by qlik_search_qvd)",
         min_length=1,
     )
     dataset_id: str = Field(
         ...,
         description=(
-            "resourceId do QVD no catálogo (campo 'resourceId' de qlik_search_qvd). "
-            "Usado para obter a lista completa de campos do QVD via data-sets API."
+            "resourceId of the QVD in the catalog (the resourceId field from qlik_search_qvd). "
+            "Used to fetch the full field list from the data-sets API."
         ),
         min_length=1,
     )
     app_qris: list[str] = Field(
         ...,
         description=(
-            "Lista de QRIs das apps dependentes (ex: ['qri:app:sense://GUID1', ...]). "
-            "Obtidos via qlik_get_qvd_impact."
+            "List of dependent app QRIs (e.g. ['qri:app:sense://GUID1', ...]). "
+            "Obtained from qlik_get_qvd_impact."
         ),
         min_length=1,
     )
@@ -404,7 +404,7 @@ class GetQvdFieldUsageInput(BaseModel):
 @mcp.tool(
     name="qlik_get_qvd_field_usage",
     annotations={
-        "title": "Analisar Uso de Campos do QVD nas Apps",
+        "title": "Analyze QVD Field Usage Across Apps",
         "readOnlyHint": True,
         "destructiveHint": False,
         "idempotentHint": True,
@@ -412,22 +412,22 @@ class GetQvdFieldUsageInput(BaseModel):
     },
 )
 async def qlik_get_qvd_field_usage(params: GetQvdFieldUsageInput) -> str:
-    """Identifica quais campos do QVD são usados em cada app e quais nunca são utilizados.
+    """Identify which QVD fields are used by each app and which are never used.
 
-    Fluxo interno:
-      1. Busca todos os campos do QVD via GET /api/v1/data-sets/{dataset_id}
-      2. Para cada app, chama GET /api/v1/apps/{appId}/data/metadata e intersecta
-         os campos do modelo de dados com o schema do QVD
-      3. Consolida: campos usados em ao menos 1 app vs campos nunca usados
+    Internal flow:
+      1. Fetch all QVD fields via GET /api/v1/data-sets/{dataset_id}
+      2. For each app, call GET /api/v1/apps/{appId}/data/metadata and intersect
+         the data model fields with the QVD schema
+      3. Consolidate: fields used in at least one app vs fields never used
 
     Args:
         params (GetQvdFieldUsageInput):
-            - qvd_qri (str): QRI do QVD base (secureQri de qlik_search_qvd).
-            - dataset_id (str): resourceId do QVD (de qlik_search_qvd).
-            - app_qris (list[str]): QRIs das apps a analisar (de qlik_get_qvd_impact).
+            - qvd_qri (str): QRI of the base QVD (secureQri from qlik_search_qvd).
+            - dataset_id (str): resourceId of the QVD (from qlik_search_qvd).
+            - app_qris (list[str]): QRIs of the apps to analyze (from qlik_get_qvd_impact).
 
     Returns:
-        str: JSON com análise consolidada:
+        str: JSON-formatted string with consolidated analysis:
             {
                 "qvd_qri": str,
                 "total_qvd_fields": int,
@@ -440,6 +440,7 @@ async def qlik_get_qvd_field_usage(params: GetQvdFieldUsageInput) -> str:
                     "app_qri": {"fields": [str], "field_count": int}
                 }
             }
+        Or "Error: <message>" on failure.
     """
     try:
         # ── Step 1: get all QVD fields from data-sets API ──────────────────
