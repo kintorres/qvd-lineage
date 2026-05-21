@@ -10,6 +10,7 @@ Environment variables required:
 
 import json
 import os
+import re
 from typing import Optional
 from urllib.parse import quote
 import httpx
@@ -92,6 +93,172 @@ def _handle_api_error(e: Exception) -> str:
     if isinstance(e, httpx.ConnectError):
         return "Error: Could not connect to Qlik. Verify your QLIK_BASE_URL environment variable."
     return f"Error: Unexpected error: {type(e).__name__}: {e}"
+
+
+# ---------------------------------------------------------------------------
+# Script parsing helpers (pure functions — no API calls)
+# ---------------------------------------------------------------------------
+
+def _extract_qvd_name_from_qri(qvd_qri: str) -> str:
+    """Extract a searchable QVD filename (without extension) from a QRI string.
+
+    Examples:
+        'qri:datafile:dsg://tenant/space/Sales_Data.qvd' -> 'Sales_Data'
+        'qri:datafile:dsg://tenant/space/Orders'         -> 'Orders'
+    """
+    parts = re.split(r"[/\\]", qvd_qri)
+    last = parts[-1] if parts else qvd_qri
+    return re.sub(r"\.qvd$", "", last, flags=re.IGNORECASE).strip() or qvd_qri
+
+
+def _resolve_variables(script: str) -> str:
+    """Extract SET/LET variable definitions and substitute $(varName) references.
+
+    Performs up to 5 substitution passes to handle nested variables such as
+    SET vFull = '$(vBase)$(vFile).qvd' where vBase and vFile are also defined.
+    """
+    var_re = re.compile(
+        r"\b(?:SET|LET)\s+(\w+)\s*=\s*'?([^';\n]+?)'?\s*;",
+        re.IGNORECASE,
+    )
+    variables: dict[str, str] = {
+        m.group(1): m.group(2).strip()
+        for m in var_re.finditer(script)
+    }
+    resolved = script
+    for _ in range(5):
+        prev = resolved
+        for name, value in variables.items():
+            resolved = re.sub(
+                r"\$\(" + re.escape(name) + r"\)",
+                value,
+                resolved,
+                flags=re.IGNORECASE,
+            )
+        if resolved == prev:
+            break
+    return resolved
+
+
+def _split_field_list(field_list: str) -> list[str]:
+    """Split a Qlik field list by top-level commas, respecting parentheses nesting.
+
+    Example:
+        'CustomerID, Year(OrderDate) AS Yr, Amount' ->
+        ['CustomerID', ' Year(OrderDate) AS Yr', ' Amount']
+    """
+    tokens: list[str] = []
+    depth = 0
+    current: list[str] = []
+    for char in field_list:
+        if char == "(":
+            depth += 1
+            current.append(char)
+        elif char == ")":
+            depth -= 1
+            current.append(char)
+        elif char == "," and depth == 0:
+            tokens.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+    if current:
+        tokens.append("".join(current).strip())
+    return tokens
+
+
+def _extract_field_from_expression(expr: str) -> str | None:
+    """Extract the source field name from a Qlik field expression.
+
+    Handles plain names, bracket-quoted names, and function calls by
+    recursively unwrapping the outermost function to reach the first argument.
+
+    Examples:
+        'OrderDate'              -> 'OrderDate'
+        '[Order Date]'           -> 'Order Date'
+        'Year(OrderDate)'        -> 'OrderDate'
+        'Left(CustomerName, 10)' -> 'CustomerName'
+    """
+    expr = expr.strip().strip(";")
+    if not expr:
+        return None
+    # Bracket-quoted field: [Field Name] -> Field Name
+    bracket = re.match(r"^\[(.+)\]$", expr)
+    if bracket:
+        return bracket.group(1)
+    # No parentheses: plain field name (strip surrounding quotes)
+    if "(" not in expr:
+        return expr.strip("\"'") or None
+    # Function call: unwrap outermost function and recurse on first argument
+    func = re.match(r"^\w+\s*\((.+)\)$", expr, re.DOTALL)
+    if func:
+        first_arg = _split_field_list(func.group(1))[0].strip() if func.group(1) else ""
+        return _extract_field_from_expression(first_arg) if first_arg else None
+    return None
+
+
+def _parse_qvd_fields_from_script(
+    script: str,
+    qvd_name: str,
+    all_qvd_fields: list[str],
+) -> list[str]:
+    """Return QVD fields referenced in LOAD statements that read from qvd_name.
+
+    Steps:
+      1. Resolve SET/LET variables to expand $(var) references in FROM paths.
+      2. Find every LOAD...FROM [...qvd_name...qvd] block.
+      3. Parse the field list: LOAD * returns all fields; otherwise extract
+         source field names (before AS, unwrapping function calls).
+      4. Return only fields that exist in all_qvd_fields, deduplicated and sorted.
+
+    Args:
+        script:         Full Qlik load script text.
+        qvd_name:       QVD filename without extension (case-insensitive match).
+        all_qvd_fields: Complete list of field names from the QVD schema.
+
+    Returns:
+        Sorted list of QVD field names referenced in matching LOAD blocks.
+        Returns all_qvd_fields if any matching block uses LOAD *.
+        Returns [] if no matching LOAD block is found.
+    """
+    qvd_field_set = set(all_qvd_fields)
+    resolved = _resolve_variables(script)
+
+    # Match: LOAD <fields> FROM [path/name.qvd] (qvd)
+    # The field list and path may span multiple lines.
+    load_from_re = re.compile(
+        r"\bLOAD\b(.*?)\bFROM\b\s*\[?([^\]\n;]+?\.qvd[^\]\n;]*?)\]?\s*\(qvd\)",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    found_fields: set[str] = set()
+
+    for match in load_from_re.finditer(resolved):
+        fields_str = match.group(1).strip()
+        from_path = match.group(2).strip()
+
+        # Check whether this FROM path references the target QVD
+        fname = re.split(r"[/\\]", from_path)[-1]
+        fname_no_ext = re.sub(r"\.qvd$", "", fname, flags=re.IGNORECASE).strip()
+        if qvd_name.lower() not in fname_no_ext.lower():
+            continue
+
+        # LOAD * → every QVD field is used
+        if fields_str.strip() == "*":
+            return sorted(all_qvd_fields)
+
+        # Parse comma-separated field expressions
+        for token in _split_field_list(fields_str):
+            token = token.strip()
+            if not token:
+                continue
+            # Source is the part before AS
+            source = re.split(r"\bAS\b", token, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+            field = _extract_field_from_expression(source)
+            if field and field in qvd_field_set:
+                found_fields.add(field)
+
+    return sorted(found_fields)
 
 
 # ---------------------------------------------------------------------------
