@@ -1,6 +1,6 @@
 # Analyze QVD Field Usage
 
-Run the full QVD field-usage analysis pipeline from start to finish, then present a clean text summary **and** a visual HTML dashboard. Do not pause for intermediate confirmation between pipeline steps — run all tool calls automatically.
+Run the full QVD field-usage analysis pipeline from start to finish, then present a text summary followed by a visual dashboard screenshot **directly in the chat**. Do not pause for intermediate confirmation between pipeline steps — run all tool calls automatically.
 
 ---
 
@@ -14,7 +14,7 @@ Call `qlik_search_qvd` with the provided name.
 
 - **Exactly one result:** Proceed automatically.
 
-- **Multiple results:** You MUST use the `AskUserQuestion` tool — do NOT present a text list. Build one question with one option per result:
+- **Multiple results:** Use the `AskUserQuestion` tool — do NOT present a text list. Build one question with one option per result:
   ```
   AskUserQuestion({
     questions: [{
@@ -26,7 +26,7 @@ Call `qlik_search_qvd` with the provided name.
           label: "<name> — <resourceSubType>",
           description: "Space ID: <spaceId> · Updated: <updatedAt>"
         },
-        ...one entry per search result...
+        ... one entry per search result ...
       ]
     }]
   })
@@ -92,51 +92,48 @@ _(If all fields are used by at least one app, write: "All fields are used by at 
 
 ---
 
-### 5b — Visual dashboard (ALWAYS required — do this for every model)
+### 5b — Visual dashboard (ALWAYS required — inline in chat, not in external browser)
 
-After the text summary, you MUST generate and open an HTML dashboard. Follow these exact steps:
+After the text summary, generate and display a dashboard **as an image directly in the chat**. Follow these exact steps every time:
 
-**Step 5b-1: Build the HTML string**
+**Step 5b-1: Write the dashboard HTML**
 
-Create a complete, self-contained HTML file. It must contain all styles inline (no external CDN dependencies). Structure:
+Use the `Write` tool to write a complete, self-contained HTML file to `/tmp/index.html`.
 
-```
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>QVD Analysis — {qvd_name}</title>
-  <style>
-    /* Use a clean sans-serif font, white background, subtle shadows */
-    /* Hero metrics row: 4 cards — Total Fields, Apps Analyzed, Fields Used, Fields Unused */
-    /* Each metric card: large bold number + label below */
-    /* Usage matrix table: sticky first column (field names), one column per app */
-    /*   Used cell:   green background (#d4edda), checkmark ✓ */
-    /*   Unused cell: light grey (#f8f9fa), dash – */
-    /* Unused fields section: badge-style chips for each field name */
-    /* Color palette: header #1a1a2e, accent #4CAF50, unused #dc3545 */
-  </style>
-</head>
-<body>
-  <!-- Header bar with QVD name and timestamp -->
-  <!-- Hero metrics: 4 cards -->
-  <!-- Usage matrix: scrollable table, rows=fields, columns=apps -->
-  <!-- Unused fields: grid of chips -->
-</body>
-</html>
+The HTML must include all CSS inline (no external CDN). Required sections:
+- **Header bar**: QVD name + analysis timestamp
+- **Hero metrics row**: 4 cards — Total Fields · Apps Analyzed · Fields Used · Fields Unused — each with a large bold number and a label beneath it
+- **Usage matrix table**: rows = field names (sorted), columns = one per app (use human-readable names from Step 3 as headers). Each cell: green `✓` if the app uses that field, grey `–` if not, light-blue `N/A` if `note` is `script_unavailable` or `qvd_not_referenced`. Alternating row background for readability. Sticky first column.
+- **Unused fields section**: a row of badge/chip elements, one per unused field name
+
+Color palette: header `#1a1a2e`, accent green `#28a745`, unused red `#dc3545`, card background white with subtle shadow.
+
+**Step 5b-2: Ensure launch.json exists**
+
+Check whether `.claude/launch.json` exists. If it does not exist, create it. If it exists, read it first and merge — do not overwrite existing entries.
+
+Add (or update) this entry in the `configurations` array:
+```json
+{
+  "name": "qvd-dashboard",
+  "runtimeExecutable": "python3",
+  "runtimeArgs": ["-m", "http.server", "8099", "--directory", "/tmp"],
+  "port": 8099
+}
 ```
 
-Populate every section with the actual data from Step 4. Use the human-readable app names from Step 3 as column headers. Fields with `note: "script_unavailable"` or `note: "qvd_not_referenced"` should show a grey `N/A` cell.
+**Step 5b-3: Start the preview server**
 
-**Step 5b-2: Write the file**
+Call `mcp__Claude_Preview__preview_start` with `{ "name": "qvd-dashboard" }`.
 
-Use the `Write` tool to write the complete HTML to `/tmp/qvd-dashboard.html`.
+Save the `serverId` from the response — you need it in the next step.
 
-**Step 5b-3: Open in browser**
+**Step 5b-4: Capture and display the dashboard**
 
-Use `ToolSearch` to load `mcp__Claude_in_Chrome__tabs_context_mcp` and `mcp__Claude_in_Chrome__navigate`, then:
+Call `mcp__Claude_Preview__preview_screenshot` with `{ "serverId": "<serverId>" }`.
 
-1. Call `mcp__Claude_in_Chrome__tabs_context_mcp` — get the list of available tabs and pick any tab ID from the current group.
-2. Call `mcp__Claude_in_Chrome__navigate` with `{ tabId: <id>, url: "file:///tmp/qvd-dashboard.html" }`.
+This returns a JPEG image that is displayed **inline in the chat** — this is the visual dashboard the user sees.
 
-If no Chrome tabs are available, fall back to running: `open /tmp/qvd-dashboard.html` via the `Bash` tool.
+**Step 5b-5: Stop the server**
+
+Call `mcp__Claude_Preview__preview_stop` with `{ "serverId": "<serverId>" }` to clean up.
