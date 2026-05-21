@@ -683,8 +683,15 @@ async def qlik_get_qvd_field_usage(params: GetQvdFieldUsageInput) -> str:
         if not all_qvd_fields:
             return f"Error: No fields found for dataset {params.dataset_id}. Verify the dataset_id."
 
-        # Derive the QVD filename (without extension) for script matching
-        qvd_name = _extract_qvd_name_from_qri(params.qvd_qri)
+        # Derive the QVD filename (without extension) for script matching.
+        # Prefer the catalog name from the data-sets response, which contains
+        # the actual filename. The QRI alone is unreliable for qri:qdf:space://
+        # format QRIs, where the path component is a space hash, not a filename.
+        ds_name = ds_data.get("name", "")
+        qvd_name = (
+            re.sub(r"\.qvd$", "", ds_name, flags=re.IGNORECASE).strip()
+            or _extract_qvd_name_from_qri(params.qvd_qri)
+        )
 
         # ── Step 2: per-app field usage via load script parsing ───────────
         per_app: dict[str, dict] = {}
