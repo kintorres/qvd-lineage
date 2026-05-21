@@ -1,4 +1,5 @@
 """Unit tests for qlik_mcp pure helper functions."""
+import json
 import sys
 import os
 import asyncio
@@ -189,9 +190,6 @@ def test_fetch_app_script_returns_none_when_no_versions():
 
 def test_field_usage_script_unavailable_note():
     """App where _fetch_app_script returns None → note: script_unavailable."""
-    import asyncio
-    from unittest.mock import AsyncMock, patch
-
     ds_data = {
         "schema": {
             "dataFields": [
@@ -213,7 +211,6 @@ def test_field_usage_script_unavailable_note():
                 )
                 return await qlik_mcp.qlik_get_qvd_field_usage(params)
 
-    import json
     result = json.loads(asyncio.run(run()))
     app_data = result["per_app"]["qri:app:sense://app-abc"]
     assert app_data["note"] == "script_unavailable"
@@ -222,9 +219,6 @@ def test_field_usage_script_unavailable_note():
 
 def test_field_usage_qvd_not_referenced_note():
     """App whose script doesn't reference the QVD → note: qvd_not_referenced."""
-    import asyncio
-    from unittest.mock import AsyncMock, patch
-
     ds_data = {
         "schema": {
             "dataFields": [{"name": "CustomerID"}, {"name": "OrderDate"}]
@@ -244,7 +238,6 @@ def test_field_usage_qvd_not_referenced_note():
                 )
                 return await qlik_mcp.qlik_get_qvd_field_usage(params)
 
-    import json
     result = json.loads(asyncio.run(run()))
     app_data = result["per_app"]["qri:app:sense://app-abc"]
     assert app_data["note"] == "qvd_not_referenced"
@@ -253,9 +246,6 @@ def test_field_usage_qvd_not_referenced_note():
 
 def test_field_usage_fields_found_note_is_null():
     """App that references QVD with schema fields → note: null, fields populated."""
-    import asyncio
-    from unittest.mock import AsyncMock, patch
-
     ds_data = {
         "schema": {
             "dataFields": [{"name": "CustomerID"}, {"name": "OrderDate"}]
@@ -274,7 +264,6 @@ def test_field_usage_fields_found_note_is_null():
                 )
                 return await qlik_mcp.qlik_get_qvd_field_usage(params)
 
-    import json
     result = json.loads(asyncio.run(run()))
     app_data = result["per_app"]["qri:app:sense://app-abc"]
     assert app_data["note"] is None
