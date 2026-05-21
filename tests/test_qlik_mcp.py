@@ -76,6 +76,12 @@ def test_parse_variable_path_resolved():
 def test_parse_no_matching_qvd_returns_empty():
     script = "LOAD CustomerID FROM [lib://Data/Orders.qvd] (qvd);"
     result = qlik_mcp._parse_qvd_fields_from_script(script, "Sales", QVD_FIELDS)
+    assert result is None
+
+
+def test_parse_qvd_found_but_no_schema_match_returns_empty_list():
+    script = "LOAD NonExistent1, NonExistent2 FROM [lib://Data/Sales.qvd] (qvd);"
+    result = qlik_mcp._parse_qvd_fields_from_script(script, "Sales", QVD_FIELDS)
     assert result == []
 
 
@@ -175,3 +181,101 @@ def test_fetch_app_script_returns_none_when_no_versions():
 
     result = asyncio.run(run())
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# qlik_get_qvd_field_usage — note logic integration tests
+# ---------------------------------------------------------------------------
+
+def test_field_usage_script_unavailable_note():
+    """App where _fetch_app_script returns None → note: script_unavailable."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    ds_data = {
+        "schema": {
+            "dataFields": [
+                {"name": "CustomerID"},
+                {"name": "OrderDate"},
+            ]
+        }
+    }
+
+    async def run():
+        with patch.object(qlik_mcp, "_qlik_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = ds_data
+            with patch.object(qlik_mcp, "_fetch_app_script", new_callable=AsyncMock) as mock_script:
+                mock_script.return_value = None
+                params = qlik_mcp.GetQvdFieldUsageInput(
+                    qvd_qri="qri:datafile:dsg://t/s/Sales.qvd",
+                    dataset_id="ds-1",
+                    app_qris=["qri:app:sense://app-abc"],
+                )
+                return await qlik_mcp.qlik_get_qvd_field_usage(params)
+
+    import json
+    result = json.loads(asyncio.run(run()))
+    app_data = result["per_app"]["qri:app:sense://app-abc"]
+    assert app_data["note"] == "script_unavailable"
+    assert app_data["fields"] == []
+
+
+def test_field_usage_qvd_not_referenced_note():
+    """App whose script doesn't reference the QVD → note: qvd_not_referenced."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    ds_data = {
+        "schema": {
+            "dataFields": [{"name": "CustomerID"}, {"name": "OrderDate"}]
+        }
+    }
+
+    async def run():
+        with patch.object(qlik_mcp, "_qlik_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = ds_data
+            with patch.object(qlik_mcp, "_fetch_app_script", new_callable=AsyncMock) as mock_script:
+                # Script that references a completely different QVD
+                mock_script.return_value = "LOAD x FROM [lib://Other.qvd] (qvd);"
+                params = qlik_mcp.GetQvdFieldUsageInput(
+                    qvd_qri="qri:datafile:dsg://t/s/Sales.qvd",
+                    dataset_id="ds-1",
+                    app_qris=["qri:app:sense://app-abc"],
+                )
+                return await qlik_mcp.qlik_get_qvd_field_usage(params)
+
+    import json
+    result = json.loads(asyncio.run(run()))
+    app_data = result["per_app"]["qri:app:sense://app-abc"]
+    assert app_data["note"] == "qvd_not_referenced"
+    assert app_data["fields"] == []
+
+
+def test_field_usage_fields_found_note_is_null():
+    """App that references QVD with schema fields → note: null, fields populated."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    ds_data = {
+        "schema": {
+            "dataFields": [{"name": "CustomerID"}, {"name": "OrderDate"}]
+        }
+    }
+
+    async def run():
+        with patch.object(qlik_mcp, "_qlik_request", new_callable=AsyncMock) as mock_req:
+            mock_req.return_value = ds_data
+            with patch.object(qlik_mcp, "_fetch_app_script", new_callable=AsyncMock) as mock_script:
+                mock_script.return_value = "LOAD CustomerID, OrderDate FROM [lib://Data/Sales.qvd] (qvd);"
+                params = qlik_mcp.GetQvdFieldUsageInput(
+                    qvd_qri="qri:datafile:dsg://t/s/Sales.qvd",
+                    dataset_id="ds-1",
+                    app_qris=["qri:app:sense://app-abc"],
+                )
+                return await qlik_mcp.qlik_get_qvd_field_usage(params)
+
+    import json
+    result = json.loads(asyncio.run(run()))
+    app_data = result["per_app"]["qri:app:sense://app-abc"]
+    assert app_data["note"] is None
+    assert app_data["fields"] == ["CustomerID", "OrderDate"]

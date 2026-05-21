@@ -201,7 +201,7 @@ def _parse_qvd_fields_from_script(
     script: str,
     qvd_name: str,
     all_qvd_fields: list[str],
-) -> list[str]:
+) -> list[str] | None:
     """Return QVD fields referenced in LOAD statements that read from qvd_name.
 
     Steps:
@@ -217,9 +217,10 @@ def _parse_qvd_fields_from_script(
         all_qvd_fields: Complete list of field names from the QVD schema.
 
     Returns:
-        Sorted list of QVD field names referenced in matching LOAD blocks.
+        None if no LOAD block references qvd_name in this script.
+        Sorted list of QVD field names referenced in matching LOAD blocks
+        (may be empty if a LOAD block was found but no fields matched the schema).
         Returns all_qvd_fields if any matching block uses LOAD *.
-        Returns [] if no matching LOAD block is found.
     """
     qvd_field_set = set(all_qvd_fields)
     resolved = _resolve_variables(script)
@@ -232,6 +233,7 @@ def _parse_qvd_fields_from_script(
     )
 
     found_fields: set[str] = set()
+    found_block = False
 
     for match in load_from_re.finditer(resolved):
         fields_str = match.group(1).strip()
@@ -242,6 +244,8 @@ def _parse_qvd_fields_from_script(
         fname_no_ext = re.sub(r"\.qvd$", "", fname, flags=re.IGNORECASE).strip()
         if qvd_name.lower() not in fname_no_ext.lower():
             continue
+
+        found_block = True
 
         # LOAD * → every QVD field is used
         if fields_str.strip() == "*":
@@ -258,6 +262,8 @@ def _parse_qvd_fields_from_script(
             if field and field in qvd_field_set:
                 found_fields.add(field)
 
+    if not found_block:
+        return None
     return sorted(found_fields)
 
 
@@ -691,11 +697,18 @@ async def qlik_get_qvd_field_usage(params: GetQvdFieldUsageInput) -> str:
                 continue
 
             fields = _parse_qvd_fields_from_script(script, qvd_name, all_qvd_fields)
-            per_app[app_qri] = {
-                "fields": fields,
-                "field_count": len(fields),
-                "note": None if fields else "qvd_not_referenced",
-            }
+            if fields is None:
+                per_app[app_qri] = {
+                    "fields": [],
+                    "field_count": 0,
+                    "note": "qvd_not_referenced",
+                }
+            else:
+                per_app[app_qri] = {
+                    "fields": fields,
+                    "field_count": len(fields),
+                    "note": None,
+                }
 
         # ── Step 3: consolidate ───────────────────────────────────────────
         all_used: dict[str, list[str]] = {}
