@@ -111,7 +111,7 @@ If you prefer the graphical interface, open the **Claude Desktop** app. The Qlik
 Claude will automatically:
 1. Search for the QVD in your Qlik Cloud tenant
 2. If multiple QVDs share the same name, present a **clickable visual picker** so you can choose the right one
-3. Find all apps that depend on it
+3. Find all apps that depend on it and resolve their human-readable names
 4. Fetch and parse each app's load script to determine field usage
 5. Present a text summary of used and unused fields
 6. Render an **interactive dashboard widget** directly in the chat (hero metrics, usage matrix, unused field badges)
@@ -125,8 +125,7 @@ These tools are called automatically by `/analyze-qvd`, but you can also invoke 
 | Tool | What it does |
 |------|-------------|
 | `qlik_search_qvd` | Search for a QVD by name; returns `resourceId` and `secureQri` needed for subsequent calls |
-| `qlik_get_qvd_impact` | Find all Qlik apps that depend on a given QVD |
-| `qlik_get_app_name` | Resolve an app QRI to a human-readable name |
+| `qlik_get_qvd_impact` | Find all Qlik apps that depend on a given QVD and return their human-readable names in a single call |
 | `qlik_get_qvd_field_usage` | Identify which QVD fields each app uses, and which are never used by any app |
 
 ---

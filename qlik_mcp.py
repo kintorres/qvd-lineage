@@ -8,6 +8,7 @@ Environment variables required:
     QLIK_API_KEY   - API key generated from the Qlik Cloud Management Console
 """
 
+import asyncio
 import json
 import os
 import re
@@ -386,6 +387,22 @@ async def _fetch_app_script(app_id: str) -> str | None:
         return None
 
 
+async def _fetch_app_name(app_qri: str) -> str:
+    """Return the human-readable name for a Qlik app QRI.
+
+    Extracts the app GUID from the QRI, queries /api/v1/apps/{appId}, and
+    returns the ``name`` attribute.  Falls back to the raw QRI on any error
+    so callers always get a usable string.
+    """
+    try:
+        app_id = app_qri.replace("qri:app:sense://", "")
+        data = await _qlik_request(f"api/v1/apps/{app_id}")
+        attrs = data.get("attributes", data)
+        return attrs.get("name") or app_qri
+    except Exception:
+        return app_qri
+
+
 # ---------------------------------------------------------------------------
 # Tool 1 — Search QVD datasets
 # ---------------------------------------------------------------------------
@@ -455,7 +472,7 @@ async def qlik_search_qvd(params: SearchQvdInput) -> str:
 
     Pipeline usage:
         1. qlik_search_qvd          → get resourceId + secureQri
-        2. qlik_get_qvd_impact      → pass secureQri, get dependent app QRIs
+        2. qlik_get_qvd_impact      → get dependent app QRIs + human-readable names
         3. qlik_get_qvd_field_usage → pass secureQri + resourceId + app QRIs
     """
     try:
@@ -500,7 +517,7 @@ async def qlik_search_qvd(params: SearchQvdInput) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Tool 2 — QVD downstream impact / lineage
+# Tool 2 — QVD downstream impact / lineage (includes app name resolution)
 # ---------------------------------------------------------------------------
 
 class GetQvdImpactInput(BaseModel):
@@ -548,11 +565,15 @@ async def qlik_get_qvd_impact(params: GetQvdImpactInput) -> str:
         str: JSON-formatted string:
             {
                 "qvd_qri": str,
-                "nodes": [...],   # Resources that depend on this QVD
-                "edges": [...],   # Relationships between those resources
+                "nodes": [...],       # All resources that depend on this QVD
+                "edges": [...],       # Relationships between those resources
+                "app_names": {        # Human-readable name per dependent app
+                    "qri:app:sense://GUID": "App Name"
+                },
                 "summary": {
                     "total_nodes": int,
-                    "total_edges": int
+                    "total_edges": int,
+                    "apps_found": int
                 }
             }
         Or "Error: <message>" on failure.
@@ -579,14 +600,38 @@ async def qlik_get_qvd_impact(params: GetQvdImpactInput) -> str:
         edges = graph.get("edges", [])
         metadata = graph.get("metadata", data.get("metadata", {}))
 
+        # Extract app QRIs from the nodes structure (dict or list)
+        if isinstance(nodes, dict):
+            app_qris_found = [k for k in nodes if k.startswith("qri:app:sense://")]
+        elif isinstance(nodes, list):
+            app_qris_found = [
+                n.get("id", n.get("qri", ""))
+                for n in nodes
+                if isinstance(n, dict)
+                and n.get("id", n.get("qri", "")).startswith("qri:app:sense://")
+            ]
+        else:
+            app_qris_found = []
+
+        # Resolve all app names concurrently — one API call per app
+        if app_qris_found:
+            resolved_names = await asyncio.gather(
+                *[_fetch_app_name(qri) for qri in app_qris_found]
+            )
+            app_names: dict[str, str] = dict(zip(app_qris_found, resolved_names))
+        else:
+            app_names = {}
+
         result = {
             "qvd_qri": params.qvd_qri,
             "nodes": nodes,
             "edges": edges,
             "metadata": metadata,
+            "app_names": app_names,
             "summary": {
                 "total_nodes": len(nodes),
                 "total_edges": len(edges),
+                "apps_found": len(app_qris_found),
             },
         }
         return json.dumps(result, indent=2)
@@ -596,75 +641,7 @@ async def qlik_get_qvd_impact(params: GetQvdImpactInput) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Tool 3 — Resolve app name from QRI or app ID
-# ---------------------------------------------------------------------------
-
-class GetAppNameInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True)
-
-    app_id: str = Field(
-        ...,
-        description="App GUID or full QRI (e.g. 'qri:app:sense://33148d98-...' or '33148d98-...')",
-        min_length=1,
-    )
-
-
-@mcp.tool(
-    name="qlik_get_app_name",
-    annotations={
-        "title": "Resolve Qlik App Name by ID or QRI",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": True,
-    },
-)
-async def qlik_get_app_name(params: GetAppNameInput) -> str:
-    """Return the name, space, and metadata of a Qlik app by its ID or full QRI.
-
-    Args:
-        params (GetAppNameInput):
-            - app_id (str): App GUID or full QRI (qri:app:sense://GUID).
-
-    Returns:
-        str: JSON-formatted string:
-            {
-                "id": str,
-                "name": str,
-                "spaceId": str,
-                "ownerId": str,
-                "createdAt": str,
-                "updatedAt": str,
-                "publishedAt": str | null
-            }
-        Or "Error: <message>" on failure.
-    """
-    try:
-        # Extract GUID if provided as a full QRI
-        app_id = params.app_id
-        if app_id.startswith("qri:app:sense://"):
-            app_id = app_id.replace("qri:app:sense://", "")
-
-        data = await _qlik_request(f"api/v1/apps/{app_id}")
-        attrs = data.get("attributes", data)
-
-        result = {
-            "id": attrs.get("id"),
-            "name": attrs.get("name"),
-            "spaceId": attrs.get("spaceId"),
-            "ownerId": attrs.get("ownerId"),
-            "createdAt": attrs.get("createdAt"),
-            "updatedAt": attrs.get("updatedAt"),
-            "publishedAt": attrs.get("publishedAt"),
-        }
-        return json.dumps(result, indent=2)
-
-    except Exception as e:
-        return _handle_api_error(e)
-
-
-# ---------------------------------------------------------------------------
-# Tool 4 — Field-level QVD usage across apps
+# Tool 3 — Field-level QVD usage across apps
 # ---------------------------------------------------------------------------
 
 class GetQvdFieldUsageInput(BaseModel):
