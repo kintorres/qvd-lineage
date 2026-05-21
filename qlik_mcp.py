@@ -118,7 +118,7 @@ def _resolve_variables(script: str) -> str:
     SET vFull = '$(vBase)$(vFile).qvd' where vBase and vFile are also defined.
     """
     var_re = re.compile(
-        r"\b(?:SET|LET)\s+(\w+)\s*=\s*'?([^';\n]+?)'?\s*;",
+        r"\b(?:SET|LET)\s+(\w+)\s*=\s*'?([^';\n]+?)'?\s*;?",
         re.IGNORECASE,
     )
     variables: dict[str, str] = {
@@ -131,7 +131,7 @@ def _resolve_variables(script: str) -> str:
         for name, value in variables.items():
             resolved = re.sub(
                 r"\$\(" + re.escape(name) + r"\)",
-                value,
+                lambda _: value,
                 resolved,
                 flags=re.IGNORECASE,
             )
@@ -164,7 +164,7 @@ def _split_field_list(field_list: str) -> list[str]:
             current.append(char)
     if current:
         tokens.append("".join(current).strip())
-    return tokens
+    return [t for t in tokens if t]
 
 
 def _extract_field_from_expression(expr: str) -> str | None:
@@ -227,7 +227,7 @@ def _parse_qvd_fields_from_script(
     # Match: LOAD <fields> FROM [path/name.qvd] (qvd)
     # The field list and path may span multiple lines.
     load_from_re = re.compile(
-        r"\bLOAD\b(.*?)\bFROM\b\s*\[?([^\]\n;]+?\.qvd[^\]\n;]*?)\]?\s*\(qvd\)",
+        r"\bLOAD\b([^;]*?)\bFROM\b\s*\[?([^\]\n;]+?\.qvd[^\]\n;]*?)\]?\s*\(qvd\)",
         re.IGNORECASE | re.DOTALL,
     )
 

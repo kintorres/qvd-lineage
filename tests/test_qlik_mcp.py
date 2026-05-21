@@ -98,6 +98,49 @@ def test_parse_multiline_load():
 
 
 # ---------------------------------------------------------------------------
+# _split_field_list
+# ---------------------------------------------------------------------------
+
+def test_split_field_list_basic():
+    result = qlik_mcp._split_field_list("CustomerID, OrderDate, Amount")
+    assert result == ["CustomerID", "OrderDate", "Amount"]
+
+
+def test_split_field_list_nested_parens():
+    result = qlik_mcp._split_field_list("Year(OrderDate), Amount, Left(Name, 10)")
+    assert result == ["Year(OrderDate)", "Amount", "Left(Name, 10)"]
+
+
+def test_split_field_list_empty_input():
+    result = qlik_mcp._split_field_list("   ")
+    assert result == []
+
+
+# ---------------------------------------------------------------------------
+# _extract_field_from_expression
+# ---------------------------------------------------------------------------
+
+def test_extract_plain_field():
+    assert qlik_mcp._extract_field_from_expression("CustomerID") == "CustomerID"
+
+
+def test_extract_bracket_quoted_field():
+    assert qlik_mcp._extract_field_from_expression("[Order Date]") == "Order Date"
+
+
+def test_extract_function_wrapped_field():
+    assert qlik_mcp._extract_field_from_expression("Year(OrderDate)") == "OrderDate"
+
+
+def test_extract_multi_arg_function():
+    assert qlik_mcp._extract_field_from_expression("Left(CustomerName, 10)") == "CustomerName"
+
+
+def test_extract_empty_returns_none():
+    assert qlik_mcp._extract_field_from_expression("") is None
+
+
+# ---------------------------------------------------------------------------
 # _fetch_app_script
 # ---------------------------------------------------------------------------
 
