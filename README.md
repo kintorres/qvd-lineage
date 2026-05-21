@@ -166,24 +166,6 @@ Each app in the result includes a `note` field:
 
 ---
 
-## Running Tests
-
-```bash
-python3 -m pytest tests/test_qlik_mcp.py -v
-```
-
-The test suite covers all pure parsing helpers end-to-end (49 tests):
-- `_extract_qvd_name_from_qri`
-- `_resolve_variables`
-- `_strip_script_comments`
-- `_extract_identifiers_from_expression`
-- `_parse_qvd_fields_from_script`
-- `_split_field_list` / `_extract_field_from_expression`
-- `_fetch_app_script` (async, mocked)
-- `qlik_get_qvd_field_usage` integration (mocked)
-
----
-
 ## Troubleshooting
 
 **"QLIK_BASE_URL and QLIK_API_KEY environment variables must be set"**
