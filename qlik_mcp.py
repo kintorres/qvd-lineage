@@ -117,12 +117,15 @@ def _resolve_variables(script: str) -> str:
     Performs up to 5 substitution passes to handle nested variables such as
     SET vFull = '$(vBase)$(vFile).qvd' where vBase and vFile are also defined.
     """
+    # Two alternatives: single-quoted value or bare (unquoted) value.
+    # Using alternation avoids the lazy-quantifier truncation that occurs
+    # when trailing quote and semicolon are both optional.
     var_re = re.compile(
-        r"\b(?:SET|LET)\s+(\w+)\s*=\s*'?([^';\n]+?)'?\s*;?",
+        r"\b(?:SET|LET)\s+(\w+)\s*=\s*(?:'([^'\n]*)'|([^';\n]+))\s*;?",
         re.IGNORECASE,
     )
     variables: dict[str, str] = {
-        m.group(1): m.group(2).strip()
+        m.group(1): (m.group(2) if m.group(2) is not None else m.group(3)).strip()
         for m in var_re.finditer(script)
     }
     resolved = script

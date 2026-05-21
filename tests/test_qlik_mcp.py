@@ -74,6 +74,16 @@ def test_parse_variable_path_resolved():
     assert result == ["CustomerID"]
 
 
+def test_parse_variable_full_filename_substituted():
+    """Variable holds the full QVD stem; must be expanded correctly."""
+    script = (
+        "SET vFile = 'Sales';\n"
+        "LOAD CustomerID FROM [lib://Data/$(vFile).qvd] (qvd);"
+    )
+    result = qlik_mcp._parse_qvd_fields_from_script(script, "Sales", QVD_FIELDS)
+    assert result == ["CustomerID"]
+
+
 def test_parse_no_matching_qvd_returns_empty():
     script = "LOAD CustomerID FROM [lib://Data/Orders.qvd] (qvd);"
     result = qlik_mcp._parse_qvd_fields_from_script(script, "Sales", QVD_FIELDS)
