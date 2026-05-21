@@ -17,7 +17,7 @@ A Claude Code MCP server that helps Qlik developers discover which fields of a Q
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/qvd-lineage.git
+git clone https://github.com/kintorres/qvd-lineage.git
 cd qvd-lineage
 ```
 
@@ -43,7 +43,7 @@ Open your Claude MCP configuration file and add the server entry below.
 ```json
 "qlik": {
   "command": "python3",
-  "args": ["/Users/YOUR_USERNAME/qvd-lineage/qlik_mcp.py"],
+  "args": ["/Users/kintorres/qvd-lineage/qlik_mcp.py"],
   "env": {
     "QLIK_BASE_URL": "https://your-tenant.us.qlikcloud.com",
     "QLIK_API_KEY": "your-api-key-here"
@@ -56,7 +56,7 @@ Open your Claude MCP configuration file and add the server entry below.
 ```json
 "qlik": {
   "command": "python",
-  "args": ["C:\\Users\\YOUR_USERNAME\\qvd-lineage\\qlik_mcp.py"],
+  "args": ["C:\\Users\\kintorres\\qvd-lineage\\qlik_mcp.py"],
   "env": {
     "QLIK_BASE_URL": "https://your-tenant.us.qlikcloud.com",
     "QLIK_API_KEY": "your-api-key-here"
