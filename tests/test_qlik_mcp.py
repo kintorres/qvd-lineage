@@ -179,6 +179,115 @@ def test_parse_field_after_block_comment():
 
 
 # ---------------------------------------------------------------------------
+# _extract_identifiers_from_expression
+# ---------------------------------------------------------------------------
+
+SCHEMA = {"CustomerID", "OrderDate", "Amount", "Region", "Status", "Hotel",
+          "NCONTROLE", "CODALMOX", "MES", "ANO"}
+
+
+def test_identifiers_plain_field():
+    result = qlik_mcp._extract_identifiers_from_expression("CustomerID", SCHEMA)
+    assert result == {"CustomerID"}
+
+
+def test_identifiers_string_literal_not_matched():
+    """String literals like 'E' must not be confused with a field named E."""
+    schema = {"E", "CustomerID"}
+    result = qlik_mcp._extract_identifiers_from_expression("CustomerID & 'E' & 'x'", schema)
+    assert "CustomerID" in result
+    assert "E" not in result
+
+
+def test_identifiers_concatenation():
+    """All identifiers inside a & concatenation must be found."""
+    expr = "TRIM(NCONTROLE & 'E' & CODALMOX & MES & ANO & Hotel)"
+    result = qlik_mcp._extract_identifiers_from_expression(expr, SCHEMA)
+    assert result == {"NCONTROLE", "CODALMOX", "MES", "ANO", "Hotel"}
+
+
+def test_identifiers_arithmetic():
+    result = qlik_mcp._extract_identifiers_from_expression(
+        "Amount * 1.1 + Region", {"Amount", "Region"}
+    )
+    assert result == {"Amount", "Region"}
+
+
+def test_identifiers_bracket_quoted():
+    result = qlik_mcp._extract_identifiers_from_expression(
+        "[Order Date] + Amount", {"Order Date", "Amount"}
+    )
+    assert result == {"Order Date", "Amount"}
+
+
+def test_identifiers_unknown_tokens_ignored():
+    result = qlik_mcp._extract_identifiers_from_expression(
+        "TRIM(Unknown1 & Unknown2)", SCHEMA
+    )
+    assert result == set()
+
+
+def test_parse_concatenation_expression():
+    """Fields inside & concatenation must all be reported."""
+    schema = ["NCONTROLE", "CODALMOX", "MES", "ANO", "Hotel", "STATUS"]
+    script = (
+        "LOAD\n"
+        "    TRIM(NCONTROLE & 'E' & CODALMOX & MES & ANO & Hotel) AS NCONTROLE_ENTRADA,\n"
+        "    STATUS\n"
+        "FROM [lib://Data/Sales.qvd] (qvd);\n"
+    )
+    result = qlik_mcp._parse_qvd_fields_from_script(script, "Sales", schema)
+    assert result == ["ANO", "CODALMOX", "Hotel", "MES", "NCONTROLE", "STATUS"]
+
+
+def test_parse_where_clause_fields():
+    """Fields referenced only in a WHERE clause must be included."""
+    schema = ["CustomerID", "OrderDate", "Status"]
+    script = (
+        "LOAD CustomerID, OrderDate\n"
+        "FROM [lib://Data/Sales.qvd] (qvd)\n"
+        "WHERE Status = 'Active';\n"
+    )
+    result = qlik_mcp._parse_qvd_fields_from_script(script, "Sales", schema)
+    assert result is not None
+    assert "CustomerID" in result
+    assert "OrderDate" in result
+    assert "Status" in result
+
+
+def test_parse_if_expression_both_branches():
+    """Both branches of an If() expression must be reported."""
+    schema = ["Hotel", "FieldA", "FieldB", "Result"]
+    script = (
+        "LOAD If(Hotel = 'X', FieldA, FieldB) AS Result\n"
+        "FROM [lib://Data/Sales.qvd] (qvd);\n"
+    )
+    result = qlik_mcp._parse_qvd_fields_from_script(script, "Sales", schema)
+    assert result is not None
+    assert "Hotel" in result
+    assert "FieldA" in result
+    assert "FieldB" in result
+
+
+def test_parse_left_join_load():
+    """LEFT JOIN LOAD pattern (real-world Vendas script) must work end-to-end."""
+    schema = ["NCONTROLE", "CODALMOX", "MES", "ANO", "Hotel",
+              "TRANSACAO", "TIPOTRANSACAO", "STATUS", "DATAENTRADA"]
+    script = (
+        "LEFT JOIN\n"
+        "LOAD\n"
+        "    TRIM(NCONTROLE & 'E' & CODALMOX & MES & ANO & Hotel) AS NCONTROLE_ENTRADA,\n"
+        "    TRANSACAO,\n"
+        "    TIPOTRANSACAO,\n"
+        "    STATUS,\n"
+        "    DATE(FLOOR(DATAENTRADA), 'DD/MM/YYYY') AS DATAENTRADA\n"
+        "FROM [lib://Data/SEI_ENTRADAS.qvd] (qvd);\n"
+    )
+    result = qlik_mcp._parse_qvd_fields_from_script(script, "SEI_ENTRADAS", schema)
+    assert result == sorted(schema)
+
+
+# ---------------------------------------------------------------------------
 # _split_field_list
 # ---------------------------------------------------------------------------
 

@@ -220,6 +220,38 @@ def _extract_field_from_expression(expr: str) -> str | None:
     return None
 
 
+def _extract_identifiers_from_expression(text: str, field_set: set[str]) -> set[str]:
+    """Return every QVD field name referenced anywhere in *text*.
+
+    Intentionally casts a wide net so that fields are found regardless of
+    how they appear: simple column references, function arguments, string
+    concatenations (``&``), arithmetic, boolean conditions (``WHERE``,
+    ``IF``), ``GROUP BY``, ``ORDER BY``, etc.
+
+    Strategy:
+      1. Strip string literals so quoted values (e.g. ``'E'``) are not
+         mistaken for field names.
+      2. Find every bracket-quoted name ``[Field Name]`` and every plain
+         identifier, then keep those that exist in *field_set*.
+
+    This means a keyword like ``DATE`` could match a QVD field called
+    ``DATE`` — which is correct behaviour, since the field *is* referenced.
+    """
+    # Remove single-quoted and double-quoted string literals
+    text = re.sub(r"'[^']*'", " ", text)
+    text = re.sub(r'"[^"]*"', " ", text)
+    found: set[str] = set()
+    # Bracket-quoted names: [Order Date]
+    for m in re.finditer(r"\[([^\]]+)\]", text):
+        if m.group(1) in field_set:
+            found.add(m.group(1))
+    # Plain identifiers
+    for m in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", text):
+        if m.group(1) in field_set:
+            found.add(m.group(1))
+    return found
+
+
 def _parse_qvd_fields_from_script(
     script: str,
     qvd_name: str,
@@ -228,39 +260,50 @@ def _parse_qvd_fields_from_script(
     """Return QVD fields referenced in LOAD statements that read from qvd_name.
 
     Steps:
-      1. Resolve SET/LET variables to expand $(var) references in FROM paths.
-      2. Find every LOAD...FROM [...qvd_name...qvd] block.
-      3. Parse the field list: LOAD * returns all fields; otherwise extract
-         source field names (before AS, unwrapping function calls).
-      4. Return only fields that exist in all_qvd_fields, deduplicated and sorted.
+      1. Strip Qlik comments and resolve SET/LET variables.
+      2. Find every ``LOAD … FROM [path/name.qvd] (qvd) … ;`` block.
+      3. For ``LOAD *`` return every QVD field.
+      4. Otherwise scan the **entire** block — field list AND any clauses
+         after ``(qvd)`` such as ``WHERE``, ``GROUP BY``, ``ORDER BY`` —
+         for any token that matches a QVD field name.
+
+    Scanning the whole block (step 4) correctly handles:
+      - Simple references: ``CustomerID``
+      - Renamed fields:     ``CustomerID AS CustID``  → finds CustomerID
+      - Function calls:     ``Year(OrderDate)``        → finds OrderDate
+      - Concatenations:     ``TRIM(A & 'x' & B)``      → finds A and B
+      - Arbitrary expressions: ``If(Status='A', f1, f2)`` → finds f1, f2
+      - Post-FROM clauses:  ``WHERE Status = 'Open'``  → finds Status
 
     Args:
         script:         Full Qlik load script text.
-        qvd_name:       QVD filename without extension (case-insensitive match).
+        qvd_name:       QVD filename without extension (case-insensitive).
         all_qvd_fields: Complete list of field names from the QVD schema.
 
     Returns:
-        None if no LOAD block references qvd_name in this script.
-        Sorted list of QVD field names referenced in matching LOAD blocks
-        (may be empty if a LOAD block was found but no fields matched the schema).
-        Returns all_qvd_fields if any matching block uses LOAD *.
+        None  — no LOAD block in this script references qvd_name.
+        []    — a matching block was found but no schema fields were detected.
+        [str] — sorted list of QVD fields referenced in matching blocks.
     """
     qvd_field_set = set(all_qvd_fields)
     resolved = _strip_script_comments(_resolve_variables(script))
 
-    # Match: LOAD <fields> FROM [path/name.qvd] (qvd)
-    # The field list and path may span multiple lines.
-    load_from_re = re.compile(
-        r"\bLOAD\b([^;]*?)\bFROM\b\s*\[?([^\]\n;]+?\.qvd[^\]\n;]*?)\]?\s*\(qvd\)",
+    # Capture the full LOAD statement up to its terminating semicolon.
+    #   Group 1 — field list (between LOAD and FROM)
+    #   Group 2 — FROM path
+    #   Group 3 — everything after (qvd) until ';' (WHERE, GROUP BY, etc.)
+    load_block_re = re.compile(
+        r"\bLOAD\b(.*?)\bFROM\b\s*\[?([^\]\n;]+?\.qvd[^\]\n;]*?)\]?\s*\(qvd\)(.*?);",
         re.IGNORECASE | re.DOTALL,
     )
 
     found_fields: set[str] = set()
     found_block = False
 
-    for match in load_from_re.finditer(resolved):
+    for match in load_block_re.finditer(resolved):
         fields_str = match.group(1).strip()
         from_path = match.group(2).strip()
+        post_from = match.group(3)  # WHERE / GROUP BY / ORDER BY / etc.
 
         # Check whether this FROM path references the target QVD
         fname = re.split(r"[/\\]", from_path)[-1]
@@ -274,16 +317,9 @@ def _parse_qvd_fields_from_script(
         if fields_str.strip() == "*":
             return sorted(all_qvd_fields)
 
-        # Parse comma-separated field expressions
-        for token in _split_field_list(fields_str):
-            token = token.strip()
-            if not token:
-                continue
-            # Source is the part before AS
-            source = re.split(r"\bAS\b", token, maxsplit=1, flags=re.IGNORECASE)[0].strip()
-            field = _extract_field_from_expression(source)
-            if field and field in qvd_field_set:
-                found_fields.add(field)
+        # Scan field list + post-FROM clauses for any matching field name
+        scan_text = fields_str + "\n" + post_from
+        found_fields |= _extract_identifiers_from_expression(scan_text, qvd_field_set)
 
     if not found_block:
         return None
