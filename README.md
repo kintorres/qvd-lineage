@@ -88,6 +88,10 @@ Restart Claude Code after copying the file.
 
 ## Usage
 
+There are two ways to use this tool:
+
+### Option A — Claude Code (terminal)
+
 Open Claude Code in the cloned folder:
 
 ```bash
@@ -99,6 +103,12 @@ Then type the slash command with the QVD name:
 ```
 /analyze-qvd SalesData
 ```
+
+### Option B — Claude Desktop (visual app)
+
+If you prefer the graphical interface, open the **Claude Desktop** app. The Qlik tools are automatically available once the MCP server is configured (Step 3 above). Just describe what you want in plain language:
+
+> "Analyze the QVD named SalesData — show me which fields are used by each app and which are never used."
 
 Claude will automatically:
 1. Search for the QVD in your Qlik Cloud tenant
