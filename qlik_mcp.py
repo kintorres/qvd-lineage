@@ -282,25 +282,28 @@ async def _fetch_app_script(app_id: str) -> str | None:
     """
     try:
         versions_resp = await _qlik_request(f"api/v1/apps/{app_id}/scripts")
+        # The API wraps results under "scripts" key: {"scripts": [...], "links": {...}}
+        # Fall back to "data" for forward-compat, or use the raw value if it's already a list.
         version_list: list = (
             versions_resp
             if isinstance(versions_resp, list)
-            else versions_resp.get("data", [])
+            else versions_resp.get("scripts", versions_resp.get("data", []))
         )
         if not version_list:
             return None
 
-        # Sort descending by createdAt; fall back to list order if key is absent
+        # Sort descending by modifiedTime (Qlik Cloud) or createdAt (fallback)
         try:
             version_list = sorted(
                 version_list,
-                key=lambda v: v.get("createdAt", ""),
+                key=lambda v: v.get("modifiedTime", v.get("createdAt", "")),
                 reverse=True,
             )
         except Exception:
             pass
 
-        script_id = version_list[0].get("id")
+        # Qlik Cloud uses "scriptId"; fall back to "id" for other environments
+        script_id = version_list[0].get("scriptId") or version_list[0].get("id")
         if not script_id:
             return None
 
