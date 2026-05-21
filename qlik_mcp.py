@@ -261,6 +261,54 @@ def _parse_qvd_fields_from_script(
     return sorted(found_fields)
 
 
+async def _fetch_app_script(app_id: str) -> str | None:
+    """Fetch the latest load script text for a Qlik app.
+
+    Calls GET /api/v1/apps/{app_id}/scripts to list versions, picks the most
+    recent, then calls GET /api/v1/apps/{app_id}/scripts/{id} for the content.
+
+    Returns:
+        Script text as a string, or None if the script cannot be fetched
+        (e.g. permission error, app not found, empty version list).
+    """
+    try:
+        versions_resp = await _qlik_request(f"api/v1/apps/{app_id}/scripts")
+        version_list: list = (
+            versions_resp
+            if isinstance(versions_resp, list)
+            else versions_resp.get("data", [])
+        )
+        if not version_list:
+            return None
+
+        # Sort descending by createdAt; fall back to list order if key is absent
+        try:
+            version_list = sorted(
+                version_list,
+                key=lambda v: v.get("createdAt", ""),
+                reverse=True,
+            )
+        except Exception:
+            pass
+
+        script_id = version_list[0].get("id")
+        if not script_id:
+            return None
+
+        script_data = await _qlik_request(
+            f"api/v1/apps/{app_id}/scripts/{script_id}"
+        )
+        text = (
+            script_data.get("script")
+            or script_data.get("content")
+            or script_data.get("data")
+        )
+        return text if isinstance(text, str) else None
+
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Tool 1 — Search QVD datasets
 # ---------------------------------------------------------------------------
