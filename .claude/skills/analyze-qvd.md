@@ -1,3 +1,8 @@
+---
+name: analyze-qvd
+description: Use when the user asks to analyze a QVD file, check which fields are used by each app, identify unused fields, or run any QVD field-usage or lineage analysis.
+---
+
 # Analyze QVD Field Usage
 
 Run the full QVD field-usage analysis pipeline from start to finish, then present a text summary followed by a visual dashboard screenshot **directly in the chat**. Do not pause for intermediate confirmation between pipeline steps — run all tool calls automatically.
