@@ -1,6 +1,6 @@
 # QVD Lineage
 
-A Claude Code MCP server that helps Qlik developers discover which fields of a QVD file are used — or never used — by Qlik apps. Type `/analyze-qvd <name>` in Claude and get a full field-usage breakdown in seconds.
+A Claude Code MCP server that helps Qlik developers discover which fields of a QVD file are used — or never used — by Qlik apps. Type `/analyze-qvd <name>` in Claude and get a full field-usage breakdown, including an interactive visual dashboard, in seconds.
 
 ---
 
@@ -88,8 +88,6 @@ Restart Claude Code after copying the file.
 
 ## Usage
 
-There are two ways to use this tool:
-
 ### Option A — Claude Code (terminal)
 
 Open Claude Code in the cloned folder:
@@ -112,9 +110,11 @@ If you prefer the graphical interface, open the **Claude Desktop** app. The Qlik
 
 Claude will automatically:
 1. Search for the QVD in your Qlik Cloud tenant
-2. Find all apps that depend on it
-3. Analyze which fields each app uses
-4. Present a table of used fields and a list of fields never used by any app
+2. If multiple QVDs share the same name, present a **clickable visual picker** so you can choose the right one
+3. Find all apps that depend on it
+4. Fetch and parse each app's load script to determine field usage
+5. Present a text summary of used and unused fields
+6. Render an **interactive dashboard widget** directly in the chat (hero metrics, usage matrix, unused field badges)
 
 ---
 
@@ -131,6 +131,60 @@ These tools are called automatically by `/analyze-qvd`, but you can also invoke 
 
 ---
 
+## How Field Usage Is Detected
+
+`qlik_get_qvd_field_usage` fetches and parses each app's **load script** to determine field usage. This is more accurate than inspecting the data model alone, which misses fields that are renamed, used inside expressions, or filtered out before reaching the model.
+
+### What the parser handles
+
+| Pattern | Example | Detected? |
+|---------|---------|-----------|
+| Plain field reference | `CustomerID` | ✅ |
+| Bracket-quoted name | `[Customer ID]` | ✅ |
+| Double-quoted name | `"Customer ID"` | ✅ |
+| Renamed field | `CustomerID AS CustID` | ✅ (finds `CustomerID`) |
+| Function call | `Year(OrderDate)` | ✅ (finds `OrderDate`) |
+| String concatenation | `TRIM(A & 'x' & B)` | ✅ (finds `A` and `B`) |
+| Multi-branch expression | `If(Hotel='X', f1, f2)` | ✅ (finds `Hotel`, `f1`, `f2`) |
+| Arithmetic | `Price * Qty` | ✅ (finds `Price`, `Qty`) |
+| `WHERE` clause | `WHERE Status = 'Active'` | ✅ (finds `Status`) |
+| `GROUP BY` / `ORDER BY` | `GROUP BY Hotel, ANO` | ✅ |
+| `LOAD *` wildcard | `LOAD * FROM ...` | ✅ (returns all fields) |
+| `$(variable)` in path | `FROM $(vPath)Sales.qvd` | ✅ (variable expanded) |
+| `/* block */` comments | commented-out expressions | ✅ (stripped before parsing) |
+| `// line` comments | `// old field AS x` | ✅ (stripped before parsing) |
+| `'string literals'` | `'E'` in concatenation | ✅ (not mistaken for field `E`) |
+
+### Per-app result notes
+
+Each app in the result includes a `note` field:
+
+| Note | Meaning |
+|------|---------|
+| `null` | Script was parsed successfully; `fields` list is accurate |
+| `"script_unavailable"` | The app's script could not be fetched (permissions, app not found, etc.) |
+| `"qvd_not_referenced"` | The app's script was fetched but contains no `LOAD … FROM … .qvd` block referencing this QVD |
+
+---
+
+## Running Tests
+
+```bash
+python3 -m pytest tests/test_qlik_mcp.py -v
+```
+
+The test suite covers all pure parsing helpers end-to-end (49 tests):
+- `_extract_qvd_name_from_qri`
+- `_resolve_variables`
+- `_strip_script_comments`
+- `_extract_identifiers_from_expression`
+- `_parse_qvd_fields_from_script`
+- `_split_field_list` / `_extract_field_from_expression`
+- `_fetch_app_script` (async, mocked)
+- `qlik_get_qvd_field_usage` integration (mocked)
+
+---
+
 ## Troubleshooting
 
 **"QLIK_BASE_URL and QLIK_API_KEY environment variables must be set"**
@@ -141,3 +195,6 @@ Your API key is invalid or has been revoked. Generate a new one in the Qlik Clou
 
 **Error 404 — Not Found**
 The resource could not be found in your tenant. Verify the `QLIK_BASE_URL` points to the correct tenant (e.g., `https://your-tenant.us.qlikcloud.com`).
+
+**A field I can see in the load script is missing from the results**
+The parser scans for field names that match the QVD schema. If the field appears only inside a `/* block comment */` or `// line comment`, it is correctly ignored. If it genuinely appears in an active expression and is still missing, please open an issue with the relevant script snippet.

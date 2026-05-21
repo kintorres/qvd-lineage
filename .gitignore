@@ -22,3 +22,8 @@ build/
 
 # Claude Code — local settings are user-specific, not shared
 .claude/settings.local.json
+
+# Internal development artifacts — not needed to run the app
+docs/
+tests/
+.pytest_cache/
