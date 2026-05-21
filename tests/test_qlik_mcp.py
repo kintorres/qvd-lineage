@@ -220,6 +220,61 @@ def test_identifiers_bracket_quoted():
     assert result == {"Order Date", "Amount"}
 
 
+def test_identifiers_double_quoted_field():
+    """Double-quoted names are field delimiters in Qlik, not string literals."""
+    result = qlik_mcp._extract_identifiers_from_expression(
+        '"CustomerID" + "OrderDate"', {"CustomerID", "OrderDate"}
+    )
+    assert result == {"CustomerID", "OrderDate"}
+
+
+def test_identifiers_double_quoted_with_spaces():
+    """Double-quoted field names with spaces must be matched correctly."""
+    result = qlik_mcp._extract_identifiers_from_expression(
+        '"Order Date" & Amount', {"Order Date", "Amount"}
+    )
+    assert result == {"Order Date", "Amount"}
+
+
+def test_identifiers_double_quoted_not_stripped_as_string():
+    """A field named E wrapped in double quotes must NOT be lost."""
+    schema = {"E", "CustomerID"}
+    result = qlik_mcp._extract_identifiers_from_expression(
+        'CustomerID & "E"', schema
+    )
+    assert "CustomerID" in result
+    assert "E" in result  # "E" is a field reference, not a string literal
+
+
+def test_identifiers_single_quoted_still_stripped():
+    """Single-quoted values 'E' must still be ignored."""
+    schema = {"E", "CustomerID"}
+    result = qlik_mcp._extract_identifiers_from_expression(
+        "CustomerID & 'E'", schema
+    )
+    assert "CustomerID" in result
+    assert "E" not in result
+
+
+def test_identifiers_bracket_does_not_leak_words():
+    """Words inside [Order Date] must not be matched as plain 'Order' or 'Date'."""
+    schema = {"Order", "Date", "Amount"}
+    result = qlik_mcp._extract_identifiers_from_expression(
+        "[Order Date] + Amount", schema
+    )
+    assert "Amount" in result
+    assert "Order" not in result
+    assert "Date" not in result
+
+
+def test_parse_double_quoted_field():
+    """Fields referenced with double-quote syntax must be found."""
+    schema = ["CustomerID", "OrderDate", "Amount"]
+    script = 'LOAD "CustomerID", "OrderDate" FROM [lib://Data/Sales.qvd] (qvd);'
+    result = qlik_mcp._parse_qvd_fields_from_script(script, "Sales", schema)
+    assert result == ["CustomerID", "OrderDate"]
+
+
 def test_identifiers_unknown_tokens_ignored():
     result = qlik_mcp._extract_identifiers_from_expression(
         "TRIM(Unknown1 & Unknown2)", SCHEMA

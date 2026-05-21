@@ -237,16 +237,25 @@ def _extract_identifiers_from_expression(text: str, field_set: set[str]) -> set[
     This means a keyword like ``DATE`` could match a QVD field called
     ``DATE`` — which is correct behaviour, since the field *is* referenced.
     """
-    # Remove single-quoted and double-quoted string literals
+    # Remove single-quoted string literals (Qlik string values use single quotes).
+    # Double quotes are NOT string literals in Qlik — they delimit field names,
+    # just like square brackets, so we must NOT strip them here.
     text = re.sub(r"'[^']*'", " ", text)
-    text = re.sub(r'"[^"]*"', " ", text)
     found: set[str] = set()
-    # Bracket-quoted names: [Order Date]
+    # Bracket-quoted field names: [Order Date]
     for m in re.finditer(r"\[([^\]]+)\]", text):
         if m.group(1) in field_set:
             found.add(m.group(1))
-    # Plain identifiers
-    for m in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", text):
+    # Double-quoted field names: "Order Date"
+    for m in re.finditer(r'"([^"]+)"', text):
+        if m.group(1) in field_set:
+            found.add(m.group(1))
+    # Plain identifiers — scan text with quoted regions removed first so that
+    # words inside bracket/double-quoted names are not double-counted as bare
+    # identifiers (e.g. [Order Date] should not also yield 'Order' and 'Date').
+    plain = re.sub(r"\[[^\]]+\]", " ", text)
+    plain = re.sub(r'"[^"]+"', " ", plain)
+    for m in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", plain):
         if m.group(1) in field_set:
             found.add(m.group(1))
     return found
