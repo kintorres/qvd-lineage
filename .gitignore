@@ -19,3 +19,6 @@ build/
 
 # macOS
 .DS_Store
+
+# Claude Code — local settings are user-specific, not shared
+.claude/settings.local.json
