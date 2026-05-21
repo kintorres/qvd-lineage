@@ -631,9 +631,11 @@ async def qlik_get_qvd_field_usage(params: GetQvdFieldUsageInput) -> str:
 
     Internal flow:
       1. Fetch all QVD fields via GET /api/v1/data-sets/{dataset_id}
-      2. For each app, call GET /api/v1/apps/{appId}/data/metadata and intersect
-         the data model fields with the QVD schema
-      3. Consolidate: fields used in at least one app vs fields never used
+      2. For each app, fetch its load script via GET /api/v1/apps/{appId}/scripts
+         and parse it to find which QVD fields are referenced — including fields
+         that are renamed (AS), used inside expressions, or later dropped from
+         the data model
+      3. Consolidate: fields referenced in at least one app vs fields never used
 
     Args:
         params (GetQvdFieldUsageInput):
@@ -652,56 +654,54 @@ async def qlik_get_qvd_field_usage(params: GetQvdFieldUsageInput) -> str:
                 ],
                 "fields_unused": [str],
                 "per_app": {
-                    "app_qri": {"fields": [str], "field_count": int}
+                    "app_qri": {
+                        "fields": [str],
+                        "field_count": int,
+                        "note": str | null
+                    }
                 }
             }
         Or "Error: <message>" on failure.
     """
     try:
-        # ── Step 1: get all QVD fields from data-sets API ──────────────────
-        all_qvd_fields: list[str] = []
-        try:
-            ds_data = await _qlik_request(f"api/v1/data-sets/{params.dataset_id}")
-            data_fields = ds_data.get("schema", {}).get("dataFields", [])
-            all_qvd_fields = [f.get("name") for f in data_fields if f.get("name")]
-        except Exception:
-            pass  # will fall back to fields discovered via app metadata
+        # ── Step 1: fetch all QVD fields from the data-sets API ───────────
+        ds_data = await _qlik_request(f"api/v1/data-sets/{params.dataset_id}")
+        data_fields = ds_data.get("schema", {}).get("dataFields", [])
+        all_qvd_fields = [f.get("name") for f in data_fields if f.get("name")]
+        if not all_qvd_fields:
+            return f"Error: No fields found for dataset {params.dataset_id}. Verify the dataset_id."
 
-        # ── Step 2: per-app field usage via app data model metadata ────────
-        # GET /api/v1/apps/{appId}/data/metadata returns all fields in the
-        # app's in-memory data model. Intersecting with QVD fields gives us
-        # exactly which QVD fields each app actually loads.
-        per_app: dict[str, list[str]] = {}
-        qvd_field_set = set(all_qvd_fields)
+        # Derive the QVD filename (without extension) for script matching
+        qvd_name = _extract_qvd_name_from_qri(params.qvd_qri)
+
+        # ── Step 2: per-app field usage via load script parsing ───────────
+        per_app: dict[str, dict] = {}
 
         for app_qri in params.app_qris:
             app_id = app_qri.replace("qri:app:sense://", "")
-            fields_for_app: list[str] = []
 
-            try:
-                meta = await _qlik_request(f"api/v1/apps/{app_id}/data/metadata")
-                app_fields_raw = meta.get("fields", [])
-                # Keep only fields whose name appears in the QVD schema
-                for f in app_fields_raw:
-                    name = f.get("name") or f.get("fieldName")
-                    if name and name in qvd_field_set:
-                        fields_for_app.append(name)
-            except Exception:
-                pass
+            script = await _fetch_app_script(app_id)
 
-            per_app[app_qri] = sorted(set(fields_for_app))
+            if script is None:
+                per_app[app_qri] = {
+                    "fields": [],
+                    "field_count": 0,
+                    "note": "script_unavailable",
+                }
+                continue
 
-        # ── Step 3: consolidate ─────────────────────────────────────────────
+            fields = _parse_qvd_fields_from_script(script, qvd_name, all_qvd_fields)
+            per_app[app_qri] = {
+                "fields": fields,
+                "field_count": len(fields),
+                "note": None if fields else "qvd_not_referenced",
+            }
+
+        # ── Step 3: consolidate ───────────────────────────────────────────
         all_used: dict[str, list[str]] = {}
-        for app_qri, fields in per_app.items():
-            for f in fields:
+        for app_qri, app_data in per_app.items():
+            for f in app_data["fields"]:
                 all_used.setdefault(f, []).append(app_qri)
-
-        # Merge: if app metadata found fields not in schema, add them
-        known = set(all_qvd_fields)
-        for f in all_used:
-            if f not in known:
-                all_qvd_fields.append(f)
 
         fields_unused = sorted(f for f in all_qvd_fields if f not in all_used)
 
@@ -714,10 +714,7 @@ async def qlik_get_qvd_field_usage(params: GetQvdFieldUsageInput) -> str:
                 for f, apps in sorted(all_used.items())
             ],
             "fields_unused": fields_unused,
-            "per_app": {
-                app_qri: {"fields": fields, "field_count": len(fields)}
-                for app_qri, fields in per_app.items()
-            },
+            "per_app": per_app,
         }
         return json.dumps(result, indent=2)
 
