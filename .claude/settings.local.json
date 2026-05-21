@@ -10,7 +10,8 @@
       "mcp__qlik__qlik_get_qvd_impact",
       "mcp__qlik__qlik_get_app_name",
       "mcp__qlik__qlik_get_qvd_field_usage",
-      "Bash(python3)"
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ]
   }
 }
