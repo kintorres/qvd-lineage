@@ -115,6 +115,70 @@ def test_parse_multiline_load():
 
 
 # ---------------------------------------------------------------------------
+# _strip_script_comments
+# ---------------------------------------------------------------------------
+
+def test_strip_block_comment_basic():
+    result = qlik_mcp._strip_script_comments("before /* comment */ after")
+    assert "comment" not in result
+    assert "before" in result
+    assert "after" in result
+
+
+def test_strip_block_comment_multiline():
+    result = qlik_mcp._strip_script_comments("A,\n/* old expr\n  AS X,*/\nB")
+    assert "old expr" not in result
+    assert "A," in result
+    assert "B" in result
+
+
+def test_strip_line_comment():
+    result = qlik_mcp._strip_script_comments("FieldA, // this is a comment\nFieldB")
+    assert "this is a comment" not in result
+    assert "FieldA" in result
+    assert "FieldB" in result
+
+
+def test_strip_line_comment_preserves_newline():
+    """Newline after // comment must remain so subsequent lines stay separate."""
+    result = qlik_mcp._strip_script_comments("A, // comment\nB")
+    assert "\n" in result
+
+
+def test_strip_block_comment_with_trailing_comma():
+    """Reproduce the real-world bug: field after `,*/ FIELD` must survive."""
+    text = "    DATAENTRADA,\n    /*\n    old AS DATAENTRADA,*/\n    CODALMOX_ORIGEM,"
+    result = qlik_mcp._strip_script_comments(text)
+    assert "CODALMOX_ORIGEM" in result
+    assert "old AS DATAENTRADA" not in result
+
+
+def test_parse_field_after_block_comment():
+    """Field immediately following a block comment ending with ,*/ must be found."""
+    schema = ["Hotel", "DATAENTRADA", "CODALMOX_ORIGEM", "STATUS"]
+    script = (
+        "LOAD\n"
+        "    Hotel,\n"
+        "    DATE(FLOOR(DATAENTRADA), 'DD/MM/YYYY') AS DATAENTRADA,\n"
+        "    //Date#(left(DATAENTRADA, 10), 'DD/MM/YYYY')\n"
+        "    /*\n"
+        "    If(Hotel='X',\n"
+        "          Date#(left(DATAENTRADA, 10), 'DD/MM/YYYY')\n"
+        "        , Date#(left(DATE(DATAENTRADA, 'DD/MM/YYYY'), 10), 'DD/MM/YYYY')\n"
+        "      )                                             AS DATAENTRADA,*/\n"
+        "    CODALMOX_ORIGEM                                            ,\n"
+        "    STATUS\n"
+        "FROM [lib://Data/Sales.qvd] (qvd);\n"
+    )
+    result = qlik_mcp._parse_qvd_fields_from_script(script, "Sales", schema)
+    assert result is not None
+    assert "CODALMOX_ORIGEM" in result
+    assert "STATUS" in result
+    assert "Hotel" in result
+    assert "DATAENTRADA" in result
+
+
+# ---------------------------------------------------------------------------
 # _split_field_list
 # ---------------------------------------------------------------------------
 

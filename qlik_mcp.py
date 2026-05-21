@@ -143,6 +143,26 @@ def _resolve_variables(script: str) -> str:
     return resolved
 
 
+def _strip_script_comments(script: str) -> str:
+    """Remove Qlik-style comments from a script string.
+
+    Handles:
+        /* ... */  block comments (may span multiple lines)
+        // ...     line comments (to end of line)
+
+    Block comments are replaced with a single space so that adjacent tokens
+    do not merge (e.g. ``value,*/ FIELD`` becomes ``value,  FIELD``).
+    Line comments are removed while their trailing newline is preserved.
+    """
+    # Strip block comments first — they may contain '//' inside
+    script = re.sub(r"/\*.*?\*/", " ", script, flags=re.DOTALL)
+    # Strip line comments (keep the newline so line structure is maintained).
+    # Use a negative lookbehind for ':' so that 'lib://path' URLs are not
+    # matched — only standalone '//' that begins a Qlik comment is stripped.
+    script = re.sub(r"(?<!:)//[^\n]*", "", script)
+    return script
+
+
 def _split_field_list(field_list: str) -> list[str]:
     """Split a Qlik field list by top-level commas, respecting parentheses nesting.
 
@@ -226,7 +246,7 @@ def _parse_qvd_fields_from_script(
         Returns all_qvd_fields if any matching block uses LOAD *.
     """
     qvd_field_set = set(all_qvd_fields)
-    resolved = _resolve_variables(script)
+    resolved = _strip_script_comments(_resolve_variables(script))
 
     # Match: LOAD <fields> FROM [path/name.qvd] (qvd)
     # The field list and path may span multiple lines.
