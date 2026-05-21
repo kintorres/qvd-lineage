@@ -97,48 +97,28 @@ _(If all fields are used by at least one app, write: "All fields are used by at 
 
 ---
 
-### 5b — Visual dashboard (ALWAYS required — inline in chat, not in external browser)
+### 5b — Visual dashboard (ALWAYS required — inline interactive widget, no files or servers)
 
-After the text summary, generate and display a dashboard **as an image directly in the chat**. Follow these exact steps every time:
+After the text summary, emit the dashboard as an **inline artifact** — Claude Desktop renders it as an interactive widget directly in the chat. Do NOT write files, start servers, or take screenshots.
 
-**Step 5b-1: Write the dashboard HTML**
+Output the complete self-contained HTML wrapped in an artifact block exactly like this:
 
-Use the `Write` tool to write a complete, self-contained HTML file to `/tmp/index.html`.
-
-The HTML must include all CSS inline (no external CDN). Required sections:
-- **Header bar**: QVD name + analysis timestamp
-- **Hero metrics row**: 4 cards — Total Fields · Apps Analyzed · Fields Used · Fields Unused — each with a large bold number and a label beneath it
-- **Usage matrix table**: rows = field names (sorted), columns = one per app (use human-readable names from Step 3 as headers). Each cell: green `✓` if the app uses that field, grey `–` if not, light-blue `N/A` if `note` is `script_unavailable` or `qvd_not_referenced`. Alternating row background for readability. Sticky first column.
-- **Unused fields section**: a row of badge/chip elements, one per unused field name
-
-Color palette: header `#1a1a2e`, accent green `#28a745`, unused red `#dc3545`, card background white with subtle shadow.
-
-**Step 5b-2: Ensure launch.json exists**
-
-Check whether `.claude/launch.json` exists. If it does not exist, create it. If it exists, read it first and merge — do not overwrite existing entries.
-
-Add (or update) this entry in the `configurations` array:
-```json
-{
-  "name": "qvd-dashboard",
-  "runtimeExecutable": "python3",
-  "runtimeArgs": ["-m", "http.server", "8099", "--directory", "/tmp"],
-  "port": 8099
-}
+```
+<antArtifact identifier="qvd-dashboard" type="text/html" title="QVD Analysis — {qvd_name}">
+<!DOCTYPE html>
+... full HTML here ...
+</antArtifact>
 ```
 
-**Step 5b-3: Start the preview server**
+**Required sections inside the HTML** (all CSS must be inline — no external CDN):
 
-Call `mcp__Claude_Preview__preview_start` with `{ "name": "qvd-dashboard" }`.
+- **Header bar**: QVD name + analysis timestamp
+- **Hero metrics row**: 4 cards side by side — Total Fields · Apps Analyzed · Fields Used · Fields Unused — each showing a large bold number with a label beneath
+- **Usage matrix table**: rows = field names (sorted A–Z), columns = one per app using human-readable names from Step 3 as headers. Each cell:
+  - Green background + `✓` → app uses this field
+  - Light grey + `–` → app does not use this field
+  - Light blue + `N/A` → `note` is `script_unavailable` or `qvd_not_referenced`
+  - Alternating row shading for readability; sticky first column so field names stay visible when scrolling horizontally
+- **Unused fields section**: badge/chip elements, one per unused field name
 
-Save the `serverId` from the response — you need it in the next step.
-
-**Step 5b-4: Capture and display the dashboard**
-
-Call `mcp__Claude_Preview__preview_screenshot` with `{ "serverId": "<serverId>" }`.
-
-This returns a JPEG image that is displayed **inline in the chat** — this is the visual dashboard the user sees.
-
-**Step 5b-5: Stop the server**
-
-Call `mcp__Claude_Preview__preview_stop` with `{ "serverId": "<serverId>" }` to clean up.
+Color palette: header `#1a1a2e`, used green `#28a745`, unused badge red `#dc3545`, card background white with subtle box-shadow.
